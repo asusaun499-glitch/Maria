@@ -28,7 +28,17 @@ function db(): PDO {
   $host = getenv('DB_HOST'); $name = getenv('DB_NAME'); $user = getenv('DB_USER'); $pass = getenv('DB_PASSWORD');
   if (!$host || !$name || !$user) respond(['error'=>'database_not_configured'], 503);
   $port = getenv('DB_PORT') ?: '3306';
-  $pdo = new PDO("mysql:host=$host;port=$port;dbname=$name;charset=utf8mb4", $user, $pass ?: '', [PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE=>PDO::FETCH_ASSOC, PDO::ATTR_EMULATE_PREPARES=>false]);
+  $options = [PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE=>PDO::FETCH_ASSOC, PDO::ATTR_EMULATE_PREPARES=>false];
+  $ca = getenv('DB_SSL_CA');
+  if (!$ca) respond(['error'=>'database_tls_ca_not_configured'], 503);
+  $caPath = sys_get_temp_dir() . '/maria-tidb-ca-' . hash('sha256', $ca) . '.pem';
+  if (!is_file($caPath)) {
+    if (file_put_contents($caPath, $ca, LOCK_EX) === false) respond(['error'=>'database_tls_setup_failed'], 503);
+    @chmod($caPath, 0600);
+  }
+  $options[PDO::MYSQL_ATTR_SSL_CA] = $caPath;
+  $options[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = true;
+  $pdo = new PDO("mysql:host=$host;port=$port;dbname=$name;charset=utf8mb4", $user, $pass ?: '', $options);
   return $pdo;
 }
 function csrf(): string {
