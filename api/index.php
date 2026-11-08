@@ -36,8 +36,9 @@ function db(): PDO {
     if (file_put_contents($caPath, $ca, LOCK_EX) === false) respond(['error'=>'database_tls_setup_failed'], 503);
     @chmod($caPath, 0600);
   }
-  $options[PDO::MYSQL_ATTR_SSL_CA] = $caPath;
-  $options[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = true;
+  // PHP 8.5 deprecates the legacy PDO::MYSQL_ATTR_* aliases.
+  $options[\Pdo\Mysql::ATTR_SSL_CA] = $caPath;
+  $options[\Pdo\Mysql::ATTR_SSL_VERIFY_SERVER_CERT] = true;
   $pdo = new PDO("mysql:host=$host;port=$port;dbname=$name;charset=utf8mb4", $user, $pass ?: '', $options);
   return $pdo;
 }
