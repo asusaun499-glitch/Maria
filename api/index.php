@@ -61,6 +61,19 @@ function checkCsrf(): void {
   if (!$sent || !hash_equals(csrf(), $sent)) respond(['error'=>'csrf_failed'],403);
 }
 function cleanUser(array $row): array { return ['id'=>(int)$row['id'],'email'=>$row['email'],'displayName'=>$row['display_name'],'role'=>$row['role']]; }
+function b64url(string $value): string { return rtrim(strtr(base64_encode($value), '+/', '-_'), '='); }
+function firebaseAdminToken(string $uid): string {
+  $email=(string)(getenv('FIREBASE_SERVICE_ACCOUNT_EMAIL')?:'');
+  $privateKey=(string)(getenv('FIREBASE_PRIVATE_KEY')?:'');
+  if($email===''||$privateKey==='')respond(['error'=>'firebase_upload_not_configured'],503);
+  $privateKey=str_replace('\\n',"\n",$privateKey);
+  $now=time();
+  $header=b64url(json_encode(['alg'=>'RS256','typ'=>'JWT'],JSON_THROW_ON_ERROR));
+  $payload=b64url(json_encode(['iss'=>$email,'sub'=>$email,'aud'=>'https://identitytoolkit.googleapis.com/google.identity.identitytoolkit.v1.IdentityToolkit','iat'=>$now,'exp'=>$now+3600,'uid'=>$uid,'claims'=>['admin'=>true]],JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR));
+  $unsigned=$header.'.'.$payload;$key=openssl_pkey_get_private($privateKey);
+  if($key===false||!openssl_sign($unsigned,$signature,$key,OPENSSL_ALGO_SHA256))respond(['error'=>'firebase_upload_not_configured'],503);
+  return $unsigned.'.'.b64url($signature);
+}
 
 final class DbSessionHandler implements SessionHandlerInterface {
   public function open(string $path,string $name):bool{return true;}
@@ -102,17 +115,19 @@ try {
   if ($action === 'logout') { checkCsrf(); $_SESSION=[]; session_destroy(); respond(['ok'=>true]); }
   if ($action === 'me') { respond(['user'=>user(),'csrf'=>csrf()]); }
   if ($action === 'songs') {
-    $songs=db()->query('SELECT id,title,artist,audio_url AS audioUrl,cover_url AS coverUrl,duration_seconds AS duration FROM songs WHERE published=1 ORDER BY id DESC')->fetchAll();
+    $songs=db()->query('SELECT id,title,artist,category,audio_url AS audioUrl,cover_url AS coverUrl,duration_seconds AS duration FROM songs WHERE published=1 ORDER BY id DESC')->fetchAll();
     respond(['songs'=>$songs]);
   }
+  if ($action === 'firebase-token') { $u=requireRole(['admin']);checkCsrf();respond(['token'=>firebaseAdminToken('maria-admin-'.$u['id'])]); }
   if ($action === 'lyrics') {
     $id=max(0,(int)($_GET['song']??0));$q=db()->prepare('SELECT line_no AS line,start_ms AS startMs,text FROM lyrics WHERE song_id=? ORDER BY start_ms,line_no');$q->execute([$id]);respond(['lyrics'=>$q->fetchAll()]);
   }
   if ($action === 'save-song') {
     $u=requireRole(['admin','editor']);checkCsrf();$d=input();$id=(int)($d['id']??0);$title=trim((string)($d['title']??''));$audio=trim((string)($d['audioUrl']??''));$cover=trim((string)($d['coverUrl']??''));
     if($title===''||!filter_var($audio,FILTER_VALIDATE_URL)||!in_array(parse_url($audio,PHP_URL_SCHEME),['https'],true))respond(['error'=>'invalid_song'],422);
-    if($id){$q=db()->prepare('UPDATE songs SET title=?,artist=?,audio_url=?,cover_url=?,duration_seconds=? WHERE id=?');$q->execute([$title,trim((string)($d['artist']??'Maria')),$audio,$cover?:null,max(0,(int)($d['duration']??0))?:null,$id]);}
-    else{$q=db()->prepare('INSERT INTO songs(title,artist,audio_url,cover_url,duration_seconds,created_by) VALUES(?,?,?,?,?,?)');$q->execute([$title,trim((string)($d['artist']??'Maria')),$audio,$cover?:null,max(0,(int)($d['duration']??0))?:null,$u['id']]);$id=(int)db()->lastInsertId();}
+    $category=mb_substr(trim((string)($d['category']??'เพลงของ Maria'))?:'เพลงของ Maria',0,100);
+    if($id){$q=db()->prepare('UPDATE songs SET title=?,artist=?,category=?,audio_url=?,cover_url=?,duration_seconds=? WHERE id=?');$q->execute([$title,trim((string)($d['artist']??'Maria')),$category,$audio,$cover?:null,max(0,(int)($d['duration']??0))?:null,$id]);}
+    else{$q=db()->prepare('INSERT INTO songs(title,artist,category,audio_url,cover_url,duration_seconds,created_by) VALUES(?,?,?,?,?,?,?)');$q->execute([$title,trim((string)($d['artist']??'Maria')),$category,$audio,$cover?:null,max(0,(int)($d['duration']??0))?:null,$u['id']]);$id=(int)db()->lastInsertId();}
     respond(['ok'=>true,'id'=>$id]);
   }
   if ($action === 'save-lyrics') {
