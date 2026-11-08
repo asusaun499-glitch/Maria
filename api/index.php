@@ -57,7 +57,7 @@ final class DbSessionHandler implements SessionHandlerInterface {
 session_name('maria_session');
 session_set_cookie_params(['lifetime'=>0,'path'=>'/','secure'=>true,'httponly'=>true,'samesite'=>'Lax']);
 session_set_save_handler(new DbSessionHandler(),true);
-session_start();
+try { session_start(); } catch (Throwable $e) { error_log('Session/database connection failed: ' . $e->getMessage()); respond(['error'=>'database_connection_failed'],503); }
 $action = $_GET['action'] ?? '';
 try {
   if ($action === 'csrf') respond(['csrf'=>csrf(),'user'=>user()]);
