@@ -29,14 +29,14 @@ function db(): PDO {
   if (!$host || !$name || !$user) respond(['error'=>'database_not_configured'], 503);
   $port = getenv('DB_PORT') ?: '3306';
   $options = [PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE=>PDO::FETCH_ASSOC, PDO::ATTR_EMULATE_PREPARES=>false];
-  $ca = getenv('DB_SSL_CA');
-  if (!$ca) respond(['error'=>'database_tls_ca_not_configured'], 503);
-  $caPath = sys_get_temp_dir() . '/maria-tidb-ca-' . hash('sha256', $ca) . '.pem';
-  if (!is_file($caPath)) {
-    if (file_put_contents($caPath, $ca, LOCK_EX) === false) respond(['error'=>'database_tls_setup_failed'], 503);
-    @chmod($caPath, 0600);
+   $ca = trim((string)(getenv('DB_SSL_CA') ?: ''));
+  if ($ca === '') respond(['error'=>'database_tls_ca_not_configured'], 503);
+  // Vercel variables may be pasted with literal \n sequences instead of line breaks.
+  $ca = str_replace(["\\r\\n", "\\n", "\\r"], ["\n", "\n", "\r"], $ca);
+  $ca = str_replace(["\r\n", "\r"], "\n", $ca);
+  if (!str_contains($ca, '-----BEGIN CERTIFICATE-----') || !str_contains($ca, '-----END CERTIFICATE-----')) {
+    respond(['error'=>'database_tls_ca_invalid'], 503);
   }
-  // PHP 8.5 deprecates the legacy PDO::MYSQL_ATTR_* aliases.
   $options[\Pdo\Mysql::ATTR_SSL_CA] = $caPath;
   $options[\Pdo\Mysql::ATTR_SSL_VERIFY_SERVER_CERT] = true;
   $pdo = new PDO("mysql:host=$host;port=$port;dbname=$name;charset=utf8mb4", $user, $pass ?: '', $options);
